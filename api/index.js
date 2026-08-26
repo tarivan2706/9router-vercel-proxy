@@ -1,6 +1,6 @@
 export default async function handler(req, res) {
-  // 1. Tangkap target URL dari berbagai opsi header
-  const targetHeader = req.headers['x-target-url'] || req.headers['x-relay-target'];
+  // 1. Ambil target & path dari header relay atau target baku
+  const targetHeader = req.headers['x-relay-target'] || req.headers['x-target-url'];
   const relayPath = req.headers['x-relay-path'] || '';
   
   let target = targetHeader;
@@ -10,11 +10,11 @@ export default async function handler(req, res) {
 
   if (!target) {
     return res.status(400).json({ 
-      error: 'Missing target URL. Header x-target-url, x-relay-target, or x-relay-path is required.' 
+      error: 'Missing target URL. Header x-relay-target or x-target-url is required.' 
     });
   }
 
-  // 2. Daftar Header yang WAJIB DIBUANG agar IP VPS / Identitas Asal Tidak Bocor
+  // 2. Header privacy & pengenal yang WAJIB dibuang
   const STRIP = [
     'host',
     'forwarded',
@@ -31,21 +31,21 @@ export default async function handler(req, res) {
     'content-length'
   ];
 
-  // 3. Bangun Header Bersih untuk dikirim ke Target
+  // 3. Salin header penting (Content-Type, Authorization, Cookie, dll)
   const outHeaders = { 
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
   };
 
   for (const [k, v] of Object.entries(req.headers)) {
     const keyLower = k.toLowerCase();
-    if (STRIP.includes(keyLower)) continue;               // Buang header pengenal IP/lokasi
-    if (keyLower.startsWith('x-relay-')) continue;        // Buang header kontrol relay
-    if (keyLower === 'x-target-url') continue;            // Buang header target
+    if (STRIP.includes(keyLower)) continue;
+    if (keyLower.startsWith('x-relay-')) continue;
+    if (keyLower === 'x-target-url') continue;
     outHeaders[k] = v;
   }
 
   try {
-    // 4. Baca Body dengan Aman (Mencegah Error 520 / POST Body Lost)
+    // 4. Baca Body dengan aman (support POST, PUT, PATCH, DELETE)
     let body = undefined;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       if (req.body) {
@@ -61,7 +61,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 5. Kirim Request ke Target API
+    // 5. Kirim Fetch dengan method asli (req.method)
     const response = await fetch(target, {
       method: req.method,
       headers: outHeaders,
@@ -69,7 +69,7 @@ export default async function handler(req, res) {
       redirect: 'follow',
     });
 
-    // 6. Forward Response Status & Response Headers (Skip Hop-by-Hop)
+    // 6. Forward HTTP Status & Response Headers balik ke client
     res.status(response.status);
     response.headers.forEach((value, key) => {
       if (!['connection', 'keep-alive', 'transfer-encoding', 'content-encoding', 'content-length'].includes(key.toLowerCase())) {
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // 7. Teruskan Streaming (Penting untuk Hermes/9Router) atau Send Buffer
+    // 7. Stream Response (Krusial untuk Real-time AI Streaming / Hermes)
     if (response.body) {
       const reader = response.body.getReader();
       while (true) {
